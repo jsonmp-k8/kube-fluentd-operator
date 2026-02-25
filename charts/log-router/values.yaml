@@ -73,6 +73,10 @@ labelSelector:
 fluentd:
   extraEnv: {}
   resources: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
 # extraVolumeMounts:
 #  - name: es-certs
 #    mountPath: /certs
@@ -81,6 +85,11 @@ fluentd:
 reloader:
   extraEnv: {}
   resources: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    readOnlyRootFilesystem: true
 # extraVolumeMounts:
 #  - name: es-certs
 #    mountPath: /certs
@@ -110,11 +119,11 @@ updateStrategy: {}
 prometheusEnabled: false
 metricsPort: 9000
 
-### Disable privileged access and running service as root
-#securityContext:
-#  runAsUser: 0
-#  runAsGroup: 0
-#  fsGroup: 0
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 999
+  runAsGroup: 999
+  fsGroup: 999
 
 ### By default, Fluentd does not rotate log files
 logRotate:

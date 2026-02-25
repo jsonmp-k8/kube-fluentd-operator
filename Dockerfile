@@ -1,6 +1,5 @@
 # Copyright © 2023 VMware, Inc. All Rights Reserved.
 # SPDX-License-Identifier: BSD-2-Clause
-# Similar to https://github.com/drecom/docker-centos-ruby/blob/2.6.5-slim/Dockerfile
 
 
 FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.24 AS builder
@@ -12,86 +11,57 @@ ARG TARGETARCH
 
 WORKDIR /go/src/github.com/vmware/kube-fluentd-operator/config-reloader
 COPY config-reloader .
-COPY Makefile .
 
 # Speed up local builds where vendor is populated
 ARG VERSION
-RUN make build VERSION=$VERSION TARGETARCH=$TARGETARCH TARGETOS=$TARGETOS
+RUN GO111MODULE=on GOOS=${TARGETOS} GOARCH=${TARGETARCH} CGO_ENABLED=0 \
+    go build -v -ldflags "-X github.com/vmware/kube-fluentd-operator/config-reloader/config.Version=${VERSION} -w -s" .
 
-FROM --platform=${TARGETPLATFORM:-linux/amd64} photon:4.0
+FROM --platform=${TARGETPLATFORM:-linux/amd64} ruby:3.3-slim-bookworm
 
-ARG RVM_PATH=/usr/local/rvm
-ARG RUBY_VERSION=ruby-3.1.4
-ARG RUBY_PATH=/usr/local/rvm/rubies/$RUBY_VERSION
 ARG RUBYOPT='-W:no-deprecated -W:no-experimental'
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
 
-ENV PATH=$RUBY_PATH/bin:$PATH
 ENV FLUENTD_DISABLE_BUNDLER_INJECTION=1
 ENV BUILDDEPS="\
-      gmp-devel \
-      libffi-devel \
+      libgmp-dev \
+      libffi-dev \
+      build-essential \
+      zlib1g-dev \
+      libedit-dev \
+      libgdbm-dev \
+      libssl-dev \
+      gnupg2 \
+      autoconf \
+      ca-certificates \
+      curl \
       bzip2 \
-      shadow \
-      which \
       wget \
-      vim \
       git \
-      less \
       tar \
       gzip \
-      sed \
-      gcc \
-      build-essential \
-      zlib-devel \
-      libedit \
-      libedit-devel \
-      gdbm \
-      gdbm-devel \
-      openssl-devel \
-      gpg"
+      gcc"
 
-RUN tdnf clean all && \
-    tdnf upgrade -y && \
-    tdnf erase -y toybox && \
-    tdnf install -y \
+RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
+    echo 'Binary::apt::APT::Keep-Downloaded-Packages "false";' > /etc/apt/apt.conf.d/keep-cache && \
+    apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
          findutils \
-         procps-ng \
-         util-linux \
-         systemd \
+         procps \
          net-tools && \
-    tdnf clean all
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 SHELL [ "/bin/bash", "-l", "-c" ]
 
-COPY image/failsafe.conf image/entrypoint.sh image/Gemfile image/Gemfile.lock /fluentd/
+COPY image/failsafe.conf image/entrypoint.sh image/Gemfile /fluentd/
 
-# Install the gems with bundler is better practice
-# We need to keep this as a single layer because of the builddeps
-# if we split between multiple steps, we need up with the lots of extra files between layers
-RUN tdnf install -y $BUILDDEPS \
-  && curl -sSL https://rvm.io/mpapis.asc | gpg --import \
-  && curl -sSL https://rvm.io/pkuczynski.asc | gpg --import \
-  && curl -sSL https://get.rvm.io | bash -s stable \
-  && source /etc/profile.d/rvm.sh \
-  && rvm autolibs disable \
-  && rvm requirements \
-  && rvm install --disable-binary $RUBY_VERSION --default \
-  && gem update --system --no-document \
-  && gem install bundler -v '>= 2.4.15' --default --no-document \
-  && rm -rf $RVM_PATH/src $RVM_PATH/examples $RVM_PATH/docs $RVM_PATH/archives \
-    $RUBY_PATH/lib/ruby/gems/3.*/cache $RUBY_PATH/lib/ruby/gems/3.*/doc/ \
-    /usr/share/doc /root/.bundle/cache \
-  && rvm cleanup all \
-  && gem sources --clear-all \
-  && gem cleanup \
-  && tdnf remove -y $BUILDDEPS \
-  && tdnf clean all
-
-RUN tdnf install -y $BUILDDEPS \
+# Ruby is already provided by the base image; install gems + jemalloc
+RUN apt-get update && apt-get install -y --no-install-recommends $BUILDDEPS \
   && mkdir -p /fluentd/log /fluentd/etc /fluentd/plugins /usr/local/bundle/bin/ \
   && echo 'gem: --no-document' >> /etc/gemrc \
   && bundle config silence_root_warning true \
@@ -111,8 +81,10 @@ RUN tdnf install -y $BUILDDEPS \
   && mv -v lib/libjemalloc.so* /usr/lib \
   && rm -rf /tmp/* \
   # cleanup build deps
-  && tdnf remove -y $BUILDDEPS \
-  && tdnf clean all
+  && apt-get purge -y $BUILDDEPS \
+  && apt-get autoremove -y \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY image/plugins /fluentd/plugins
 
@@ -123,8 +95,13 @@ COPY --from=builder /go/src/github.com/vmware/kube-fluentd-operator/config-reloa
 # Make sure fluentd picks jemalloc 5.3.0 lib as default
 ENV LD_PRELOAD="/usr/lib/libjemalloc.so"
 
+# Add non-root user
+RUN groupadd -r fluentd && useradd -r -g fluentd -d /fluentd -s /sbin/nologin fluentd \
+    && mkdir -p /var/log/fluentd \
+    && chown -R fluentd:fluentd /fluentd /var/log/fluentd
+
 EXPOSE 24444 5140
 
-USER root
+USER fluentd
 
 ENTRYPOINT ["/fluentd/entrypoint.sh"]
