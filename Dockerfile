@@ -67,9 +67,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends $BUILDDEPS \
   && bundle config silence_root_warning true \
   && cd /fluentd \
   && bundle install \
-  && cd /fluentd \
-  && gem specific_install https://github.com/javiercri/fluent-plugin-google-cloud.git \
-  && cd /fluentd \
   && gem sources --clear-all \
   && ln -s $(which fluentd) /usr/local/bundle/bin/fluentd \
   && gem cleanup \
@@ -77,7 +74,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends $BUILDDEPS \
   && curl -sLo /tmp/jemalloc-5.3.0.tar.bz2 https://github.com/jemalloc/jemalloc/releases/download/5.3.0/jemalloc-5.3.0.tar.bz2 \
   && tar -C /tmp/ -xjvf /tmp/jemalloc-5.3.0.tar.bz2 \
   && cd /tmp/jemalloc-5.3.0 \
-  && ./configure && make \
+  && ./configure --disable-cxx && make \
   && mv -v lib/libjemalloc.so* /usr/lib \
   && rm -rf /tmp/* \
   # cleanup build deps
