@@ -63,6 +63,10 @@ spec:
         {{- toYaml .Values.fluentd.extraEnv| nindent 10}}
         {{- end}}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.fluentd.securityContext }}
+          securityContext:
+{{  toYaml .Values.fluentd.securityContext | indent 12 }}
+          {{- end }}
           {{- if .Values.prometheusEnabled }}
           ports:
           - name: prometheus
@@ -87,6 +91,10 @@ spec:
         - name: reloader
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.reloader.securityContext }}
+          securityContext:
+{{  toYaml .Values.reloader.securityContext | indent 12 }}
+          {{- end }}
           {{- if .Values.prometheusEnabled }}
           ports:
           - name: metrics

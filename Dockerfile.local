@@ -1,23 +1,6 @@
-# Copyright © 2023 VMware, Inc. All Rights Reserved.
-# SPDX-License-Identifier: BSD-2-Clause
-
-
-FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.24 AS builder
-
-ARG TARGETPLATFORM
-ARG BUILDPLATFORM
-ARG TARGETOS
-ARG TARGETARCH
-
-WORKDIR /go/src/github.com/vmware/kube-fluentd-operator/config-reloader
-COPY config-reloader .
-
-# Speed up local builds where vendor is populated
-ARG VERSION
-RUN GO111MODULE=on GOOS=${TARGETOS} GOARCH=${TARGETARCH} CGO_ENABLED=0 \
-    go build -v -ldflags "-X github.com/vmware/kube-fluentd-operator/config-reloader/config.Version=${VERSION} -w -s" .
-
-FROM --platform=${TARGETPLATFORM:-linux/amd64} ruby:3.3-alpine3.20
+# Single-stage Alpine build for local development (Go binary pre-compiled)
+# Uses Alpine to work around dpkg lzma memory issues in Docker Desktop
+FROM ruby:3.3-alpine3.20
 
 ARG RUBYOPT='-W:no-deprecated -W:no-experimental'
 
@@ -75,7 +58,7 @@ COPY image/plugins /fluentd/plugins
 
 COPY config-reloader/templates /templates
 COPY config-reloader/validate-from-dir.sh /bin/validate-from-dir.sh
-COPY --from=builder /go/src/github.com/vmware/kube-fluentd-operator/config-reloader/config-reloader /bin/config-reloader
+COPY config-reloader-bin /bin/config-reloader
 
 # Make sure fluentd picks jemalloc 5.3.0 lib as default
 ENV LD_PRELOAD="/usr/lib/libjemalloc.so"
