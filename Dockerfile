@@ -17,24 +17,32 @@ ARG VERSION
 RUN GO111MODULE=on GOOS=${TARGETOS} GOARCH=${TARGETARCH} CGO_ENABLED=0 \
     go build -v -ldflags "-X github.com/vmware/kube-fluentd-operator/config-reloader/config.Version=${VERSION} -w -s" .
 
-FROM --platform=${TARGETPLATFORM:-linux/amd64} ruby:3.3-slim-bookworm
+FROM --platform=${TARGETPLATFORM:-linux/amd64} ruby:3.3-alpine3.20
 
 ARG RUBYOPT='-W:no-deprecated -W:no-experimental'
-ARG TARGETPLATFORM
-ARG BUILDPLATFORM
-ARG TARGETOS
-ARG TARGETARCH
 
 ENV FLUENTD_DISABLE_BUNDLER_INJECTION=1
-ENV BUILDDEPS="\
-      libgmp-dev \
+
+RUN apk add --no-cache \
+      findutils \
+      procps \
+      net-tools \
+      bash
+
+SHELL [ "/bin/bash", "-l", "-c" ]
+
+COPY image/failsafe.conf image/entrypoint.sh image/Gemfile /fluentd/
+
+# Install gems + jemalloc
+RUN apk add --no-cache --virtual .build-deps \
+      gmp-dev \
       libffi-dev \
-      build-essential \
-      zlib1g-dev \
+      build-base \
+      zlib-dev \
       libedit-dev \
-      libgdbm-dev \
-      libssl-dev \
-      gnupg2 \
+      gdbm-dev \
+      openssl-dev \
+      gnupg \
       autoconf \
       ca-certificates \
       curl \
@@ -43,25 +51,8 @@ ENV BUILDDEPS="\
       git \
       tar \
       gzip \
-      gcc"
-
-RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
-    echo 'Binary::apt::APT::Keep-Downloaded-Packages "false";' > /etc/apt/apt.conf.d/keep-cache && \
-    apt-get update && \
-    apt-get upgrade -y && \
-    apt-get install -y --no-install-recommends \
-         findutils \
-         procps \
-         net-tools && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-SHELL [ "/bin/bash", "-l", "-c" ]
-
-COPY image/failsafe.conf image/entrypoint.sh image/Gemfile /fluentd/
-
-# Ruby is already provided by the base image; install gems + jemalloc
-RUN apt-get update && apt-get install -y --no-install-recommends $BUILDDEPS \
+      gcc \
+      linux-headers \
   && mkdir -p /fluentd/log /fluentd/etc /fluentd/plugins /usr/local/bundle/bin/ \
   && echo 'gem: --no-document' >> /etc/gemrc \
   && bundle config silence_root_warning true \
@@ -78,10 +69,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends $BUILDDEPS \
   && mv -v lib/libjemalloc.so* /usr/lib \
   && rm -rf /tmp/* \
   # cleanup build deps
-  && apt-get purge -y $BUILDDEPS \
-  && apt-get autoremove -y \
-  && apt-get clean \
-  && rm -rf /var/lib/apt/lists/*
+  && apk del .build-deps
 
 COPY image/plugins /fluentd/plugins
 
@@ -93,7 +81,7 @@ COPY --from=builder /go/src/github.com/vmware/kube-fluentd-operator/config-reloa
 ENV LD_PRELOAD="/usr/lib/libjemalloc.so"
 
 # Add non-root user
-RUN groupadd -r fluentd && useradd -r -g fluentd -d /fluentd -s /sbin/nologin fluentd \
+RUN addgroup -S fluentd && adduser -S -G fluentd -h /fluentd -s /sbin/nologin fluentd \
     && mkdir -p /var/log/fluentd \
     && chown -R fluentd:fluentd /fluentd /var/log/fluentd
 
